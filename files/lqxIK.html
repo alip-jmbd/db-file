@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team 7 Voxel Scene</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; }
+        canvas { display: block; }
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-family: sans-serif; color: white; font-weight: bold; text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+        }
+    </style>
+    <!-- Import Three.js and OrbitControls from CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <style>
+      /* Hides common overlay IDs and classes used in Three.js examples and generated code */
+      #info, #loading, #ui, #instructions, .label, .overlay, #description {
+        display: none !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        visibility: hidden !important;
+      }
+      /* Ensure the body doesn't show selected text cursor interaction outside canvas */
+      body {
+        user-select: none !important;
+      }
+    </style>
+  </head>
+<body>
+    <div id="loading">Assembling Chakra...</div>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Configuration ---
+        const VOXEL_SIZE = 1;
+        const PALETTE = {
+            skin: 0xffdfc4,
+            sakura_hair: 0xff9eb5,
+            sakura_red: 0x9e2a2f,
+            sakura_skirt: 0xeeddcc,
+            sasuke_hair: 0x222233,
+            sasuke_shirt: 0xeaeaea,
+            sasuke_rope: 0x4433aa,
+            kakashi_hair: 0xdddddd,
+            kakashi_vest: 0x4a6b4a,
+            kakashi_mask: 0x222222,
+            naruto_hair: 0xffcc00,
+            naruto_orange: 0xff6600,
+            naruto_blue: 0x112244,
+            metal: 0xcccccc,
+            black: 0x111111,
+            white: 0xffffff
+        };
+
+        let scene, camera, renderer, controls;
+        let petals = [];
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 80);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // Low angle shot looking up, similar to the reference
+            camera.position.set(0, -8, 12);
+            camera.lookAt(0, 5, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.maxPolarAngle = Math.PI / 1.5; // Don't go below ground
+            controls.target.set(0, 5, 0);
+
+            // 2. Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            dirLight.position.set(10, 20, 10);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // 3. Create Characters
+            const charGroup = new THREE.Group();
+            
+            // Sakura (Left)
+            const sakura = createCharacter('sakura');
+            sakura.position.set(-6, 0, 2);
+            sakura.rotation.y = Math.PI / 6;
+            charGroup.add(sakura);
+
+            // Sasuke (Middle Left)
+            const sasuke = createCharacter('sasuke');
+            sasuke.position.set(-2, 0, -1);
+            sasuke.rotation.y = Math.PI / 12;
+            charGroup.add(sasuke);
+
+            // Kakashi (Middle Right - Back)
+            const kakashi = createCharacter('kakashi');
+            kakashi.position.set(2, 1, -2); // Slightly taller/back
+            kakashi.rotation.y = -Math.PI / 12;
+            charGroup.add(kakashi);
+
+            // Naruto (Right)
+            const naruto = createCharacter('naruto');
+            naruto.position.set(6, 0, 2);
+            naruto.rotation.y = -Math.PI / 6;
+            charGroup.add(naruto);
+
+            scene.add(charGroup);
+
+            // 4. Environment
+            createClouds();
+            createPetals();
+
+            // Remove loading text
+            document.getElementById('loading').style.display = 'none';
+            
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // --- Voxel Builder Helper ---
+        function createBox(color, x, y, z, sX=1, sY=1, sZ=1) {
+            const geom = new THREE.BoxGeometry(sX, sY, sZ);
+            const mat = new THREE.MeshStandardMaterial({ color: color });
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        function createCharacter(type) {
+            const group = new THREE.Group();
+            const headGroup = new THREE.Group(); // To rotate head separately if needed
+
+            // Common Body Dimensions
+            // Legs
+            const legColor = (type === 'naruto') ? PALETTE.naruto_orange : 
+                             (type === 'sakura') ? PALETTE.sakura_skirt : 
+                             (type === 'sasuke') ? PALETTE.black : PALETTE.kakashi_mask; // dark pants
+
+            const leftLeg = createBox(legColor, -0.6, 2, 0, 1.1, 4, 1.2);
+            const rightLeg = createBox(legColor, 0.6, 2, 0, 1.1, 4, 1.2);
+            group.add(leftLeg, rightLeg);
+
+            // Torso
+            let torsoColor = PALETTE.white;
+            if (type === 'naruto') torsoColor = PALETTE.naruto_orange;
+            if (type === 'sakura') torsoColor = PALETTE.sakura_red;
+            if (type === 'sasuke') torsoColor = PALETTE.sasuke_shirt;
+            if (type === 'kakashi') torsoColor = PALETTE.black; // Shirt under vest
+
+            const torso = createBox(torsoColor, 0, 6, 0, 2.4, 4, 1.4);
+            group.add(torso);
+
+            // Arms
+            const armColor = (type === 'sakura') ? PALETTE.skin : torsoColor; // Sakura sleeveless-ish
+            const leftArm = createBox(armColor, -1.8, 6, 0, 1, 3.8, 1.2);
+            const rightArm = createBox(armColor, 1.8, 6, 0, 1, 3.8, 1.2);
+            group.add(leftArm, rightArm);
+
+            // Skin (Head Base)
+            const headSize = 2.2;
+            const head = createBox(PALETTE.skin, 0, 0, 0, headSize, headSize, headSize);
+            headGroup.position.y = 9.2;
+            
+            // Mask for Kakashi
+            if (type === 'kakashi') {
+                const mask = createBox(PALETTE.kakashi_mask, 0, -0.5, 0.1, 2.25, 1.2, 2.25);
+                headGroup.add(mask);
+            }
+
+            headGroup.add(head);
+
+            // Headband (Forehead protector)
+            if (type !== 'sasuke') { // Sasuke usually doesn't wear it on forehead in Shippuden white outfit, but let's skip for variance
+                const bandColor = (type === 'sakura') ? PALETTE.sakura_red : PALETTE.black;
+                const band = createBox(bandColor, 0, 0.6, 1.15, 2.3, 0.5, 0.2);
+                const plate = createBox(PALETTE.metal, 0, 0.6, 1.3, 1.2, 0.3, 0.1);
+                headGroup.add(band, plate);
+            }
+
+            // --- Specific Details ---
+
+            if (type === 'naruto') {
+                // Jacket Blue details
+                const collar = createBox(PALETTE.naruto_blue, 0, 7.8, -0.1, 2.5, 0.8, 1.5);
+                const shoulderL = createBox(PALETTE.naruto_blue, -1.8, 7.5, 0, 1.1, 0.5, 1.3);
+                const shoulderR = createBox(PALETTE.naruto_blue, 1.8, 7.5, 0, 1.1, 0.5, 1.3);
+                const zipper = createBox(PALETTE.black, 0, 6, 0.75, 0.2, 4, 0.1);
+                group.add(collar, shoulderL, shoulderR, zipper);
+
+                // Hair (Spiky Yellow)
+                addVoxelHair(headGroup, PALETTE.naruto_hair, 'spiky');
+                
+                // Whiskers
+                const w1 = createBox(PALETTE.black, -0.5, -0.2, 1.12, 0.4, 0.05, 0.1);
+                const w2 = createBox(PALETTE.black, 0.5, -0.2, 1.12, 0.4, 0.05, 0.1);
+                const w3 = createBox(PALETTE.black, -0.5, -0.4, 1.12, 0.4, 0.05, 0.1);
+                const w4 = createBox(PALETTE.black, 0.5, -0.4, 1.12, 0.4, 0.05, 0.1);
+                headGroup.add(w1, w2, w3, w4);
+            }
+
+            if (type === 'sakura') {
+                // Hair (Pink Framed)
+                addVoxelHair(headGroup, PALETTE.sakura_hair, 'bob');
+                
+                // Skirt flap
+                const skirt = createBox(PALETTE.sakura_skirt, 0, 4.2, 0, 2.5, 0.8, 1.5);
+                group.add(skirt);
+            }
+
+            if (type === 'sasuke') {
+                // High Collar
+                const collar = createBox(PALETTE.sasuke_shirt, 0, 8.2, -0.5, 2.5, 1.5, 0.5);
+                const collarSideL = createBox(PALETTE.sasuke_shirt, -1.2, 8.2, 0, 0.5, 1.5, 1.4);
+                const collarSideR = createBox(PALETTE.sasuke_shirt, 1.2, 8.2, 0, 0.5, 1.5, 1.4);
+                group.add(collar, collarSideL, collarSideR);
+
+                // Rope Belt
+                const rope = createBox(PALETTE.sasuke_rope, 0, 4, 0, 2.6, 0.6, 1.6);
+                group.add(rope);
+
+                // Hair (Duckbutt style - Spiky back, bangs)
+                addVoxelHair(headGroup, PALETTE.sasuke_hair, 'emo');
+            }
+
+            if (type === 'kakashi') {
+                // Green Vest
+                const vest = createBox(PALETTE.kakashi_vest, 0, 6.5, 0, 2.5, 2.5, 1.5);
+                const collar = createBox(PALETTE.kakashi_vest, 0, 7.8, 0, 2.2, 0.6, 1.4);
+                group.add(vest, collar);
+
+                // Hair (Silver sweep)
+                addVoxelHair(headGroup, PALETTE.kakashi_hair, 'sweep');
+                
+                // Headband slanted over eye
+                const bandSlant = createBox(PALETTE.black, 0.4, 0.5, 1.15, 1.4, 1.4, 0.2);
+                bandSlant.rotation.z = -0.2;
+                headGroup.add(bandSlant);
+            }
+
+            group.add(headGroup);
+            return group;
+        }
+
+        function addVoxelHair(parent, color, style) {
+            const hairGroup = new THREE.Group();
+            const size = 1; 
+            
+            // Base Cap
+            hairGroup.add(createBox(color, 0, 1.2, 0, 2.4, 0.5, 2.4));
+            hairGroup.add(createBox(color, 0, 0, -1.2, 2.4, 2.0, 0.5)); // Back
+
+            if (style === 'spiky') { // Naruto
+                // Random spikes on top
+                hairGroup.add(createBox(color, 0, 1.6, 0, 1, 1, 1));
+                hairGroup.add(createBox(color, -0.8, 1.4, 0.5, 0.8, 0.8, 0.8));
+                hairGroup.add(createBox(color, 0.8, 1.4, 0.5, 0.8, 0.8, 0.8));
+                hairGroup.add(createBox(color, 0, 1.4, -0.8, 0.8, 0.8, 0.8));
+                // Bangs
+                hairGroup.add(createBox(color, 0, 0.8, 1.2, 2.2, 0.4, 0.2));
+            } else if (style === 'bob') { // Sakura
+                // Sides
+                hairGroup.add(createBox(color, -1.2, 0, 0, 0.4, 2.5, 2.4));
+                hairGroup.add(createBox(color, 1.2, 0, 0, 0.4, 2.5, 2.4));
+                // Top
+                hairGroup.add(createBox(color, 0, 1.4, 0, 2.2, 0.4, 2.2));
+            } else if (style === 'emo') { // Sasuke
+                // Sides long
+                hairGroup.add(createBox(color, -1.2, 0.5, 0.5, 0.4, 2, 1.5));
+                hairGroup.add(createBox(color, 1.2, 0.5, 0.5, 0.4, 2, 1.5));
+                // Back Spikes
+                const spike = createBox(color, 0, 1.2, -1.5, 1.5, 1.5, 1);
+                spike.rotation.x = -0.5;
+                hairGroup.add(spike);
+            } else if (style === 'sweep') { // Kakashi
+                // Sweep Left
+                const sweep = createBox(color, -0.5, 1.5, 0, 1.5, 1.5, 2);
+                sweep.rotation.z = 0.3;
+                hairGroup.add(sweep);
+            }
+
+            parent.add(hairGroup);
+        }
+
+        function createClouds() {
+            const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, opacity: 0.8, transparent: true });
+            
+            for(let i=0; i<20; i++) {
+                const group = new THREE.Group();
+                const nBlobs = Math.floor(Math.random() * 5) + 3;
+                
+                for(let j=0; j<nBlobs; j++) {
+                    const s = Math.random() * 2 + 2;
+                    const geom = new THREE.BoxGeometry(s, s, s);
+                    const mesh = new THREE.Mesh(geom, cloudMat);
+                    mesh.position.set(
+                        (Math.random() - 0.5) * 4,
+                        (Math.random() - 0.5) * 2,
+                        (Math.random() - 0.5) * 3
+                    );
+                    group.add(mesh);
+                }
+
+                // Position clouds in background
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 30 + Math.random() * 20;
+                group.position.set(
+                    Math.cos(angle) * radius,
+                    10 + Math.random() * 15,
+                    Math.sin(angle) * radius
+                );
+                scene.add(group);
+            }
+        }
+
+        function createPetals() {
+            const geom = new THREE.PlaneGeometry(0.2, 0.2);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffc0cb, side: THREE.DoubleSide });
+            
+            for(let i=0; i<200; i++) {
+                const petal = new THREE.Mesh(geom, mat);
+                
+                // Random start positions roughly above the camera/scene
+                petal.position.set(
+                    (Math.random() - 0.5) * 30,
+                    Math.random() * 20 + 5,
+                    (Math.random() - 0.5) * 30
+                );
+                
+                petal.rotation.set(Math.random(), Math.random(), Math.random());
+                
+                // Custom properties for animation
+                petal.userData = {
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 0.1, 
+                        -Math.random() * 0.1 - 0.02, 
+                        (Math.random() - 0.5) * 0.1
+                    ),
+                    rotSpeed: new THREE.Vector3(
+                        Math.random() * 0.1,
+                        Math.random() * 0.1,
+                        Math.random() * 0.1
+                    )
+                };
+
+                petals.push(petal);
+                scene.add(petal);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // Animate Petals
+            petals.forEach(p => {
+                p.position.add(p.userData.velocity);
+                p.rotation.x += p.userData.rotSpeed.x;
+                p.rotation.y += p.userData.rotSpeed.y;
+                p.rotation.z += p.userData.rotSpeed.z;
+
+                // Reset if too low
+                if(p.position.y < -5) {
+                    p.position.y = 20;
+                    p.position.x = (Math.random() - 0.5) * 30;
+                    p.position.z = (Math.random() - 0.5) * 30;
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
